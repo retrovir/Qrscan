@@ -1,125 +1,66 @@
-import express from "express";
-import mongoose from "mongoose";
-import makeWASocket, { useMultiFileAuthState } from "@whiskeysockets/baileys";
+import makeWASocket from "@whiskeysockets/baileys";
 import qrcode from "qrcode";
+import express from "express";
+import dotenv from "dotenv";
+
+dotenv.config();
 
 const app = express();
+const PORT = process.env.PORT || 10000;
 
-// MongoDB Schema
-const SessionSchema = new mongoose.Schema({
-  sessionId: { type: String, unique: true },
-  authData: Object,
-  createdAt: { type: Date, default: Date.now }
-});
-const Session = mongoose.model("Session", SessionSchema);
+let latestQR = null;
+let pairingError = null;
+let sessionId = null;
 
-// Connect MongoDB
-const mongoURL = process.env.MONGO_URL;
-if (!mongoURL) {
-  console.error("❌ MONGO_URL missing in Render Environment Variables");
-  process.exit(1);
-}
-await mongoose.connect(mongoURL);
-console.log("✅ Connected to MongoDB");
-
-// Root redirect to default session
-app.get("/", (req,res) => {
-  // Change "defaultSession" to any default session ID you want
-  res.redirect("/qr/defaultSession");
+const sock = makeWASocket({
+  printQRInTerminal: false,
+  browser: ["Render", "Chrome", "1.0"]
 });
 
-// QR endpoint
-app.get("/qr/:id", async (req, res) => {
-  const sessionId = req.params.id;
+sock.ev.on("connection.update", async (update) => {
+  const { qr, connection, lastDisconnect } = update;
 
-  try {
-    // Check if session already exists
-    const existing = await Session.findOne({ sessionId });
-    if (existing) {
-      return res.send(`
-        <html>
-        <head>
-          <title>WhatsApp QR</title>
-          <style>
-            body{display:flex;justify-content:center;align-items:center;height:100vh;background:#0f172a;color:white;font-family:sans-serif;}
-          </style>
-        </head>
-        <body>
-          <h1>✅ Session "${sessionId}" already paired!</h1>
-        </body>
-        </html>
-      `);
-    }
+  if (qr) {
+    latestQR = await qrcode.toDataURL(qr);
+  }
 
-    const { state, saveCreds } = await useMultiFileAuthState(`./creds/${sessionId}`);
-    const sock = makeWASocket({
-      auth: state,
-      browser: ["Render","Baileys","1.0.0"],
-      printQRInTerminal: false
-    });
+  if (connection === "open") {
+    sessionId = `session-${Date.now()}`; // auto-generated session id
+    latestQR = null;
+  }
 
-    let qrSent = false;
-
-    sock.ev.on("connection.update", async (update) => {
-      if(update.qr && !qrSent){
-        qrSent = true;
-        const qrImage = await qrcode.toDataURL(update.qr);
-
-        const html = `
-          <html>
-          <head>
-            <title>WhatsApp QR</title>
-            <meta http-equiv="refresh" content="30">
-            <style>
-              body{display:flex;justify-content:center;align-items:center;height:100vh;flex-direction:column;background:#0f172a;}
-              img{width:300px;height:300px;padding:20px;background:white;border-radius:20px;margin-bottom:15px;}
-              p{color:white;font-family:sans-serif;margin:5px;}
-            </style>
-          </head>
-          <body>
-            <img src="${qrImage}" alt="WhatsApp QR"/>
-            <p>QR refreshes every 30 seconds until scanned</p>
-            <p id="countdown">Refreshing in 30s</p>
-
-            <script>
-              let time = 30;
-              const cd = document.getElementById('countdown');
-              setInterval(() => {
-                time--;
-                if(time<=0){ time=30; }
-                cd.textContent = 'Refreshing in ' + time + 's';
-              },1000);
-            </script>
-          </body>
-          </html>
-        `;
-        return res.send(html);
-      }
-
-      if(update.connection === "open"){
-        await saveCreds();
-        await Session.create({ sessionId, authData: state.creds });
-        sock.ws.close();
-        console.log(`✅ Session paired: ${sessionId}`);
-      }
-
-      if(update.connection === "close"){
-        sock.ws.close();
-        if(!qrSent){
-          return res.send("<p>❌ Connection closed before QR scanned. Retry.</p>");
-        }
-      }
-    });
-
-    sock.ev.on("creds.update", saveCreds);
-
-  } catch (err) {
-    console.error(err);
-    return res.send(`<p>❌ Server error: ${err.message}</p>`);
+  if (lastDisconnect?.error) {
+    pairingError = lastDisconnect.error?.message || "Unknown disconnect error";
   }
 });
 
-// Health check
-app.get("/health", (req,res) => res.send("🟢 Running"));
+app.get("/", (req, res) => {
+  res.send(`
+  <html>
+  <head>
+    <title>WhatsApp Pairing Portal</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <style>
+      body { font-family: Poppins, sans-serif; display:flex; justify-content:center; align-items:center; height:100vh; background:#0f172a; color:white; text-align:center; }
+      img { width:260px; border-radius:16px; padding:12px; background:white; }
+      .box { padding:22px; border-radius:18px; background:#1e293b; box-shadow:0 0 18px rgba(255,255,255,0.1); }
+      .error { color:#ff6b6b; margin-top:12px; }
+      .success { color:#4ade80; font-size:20px; margin-top:14px; }
+    </style>
+  </head>
+  <body>
+    <div class="box box">
+      <h2>Scan WhatsApp QR to Pair</h2>
 
-app.listen(process.env.PORT || 3000, () => console.log("🚀 Server running"));
+      ${ pairingError ? `<div class="error">❌ Error: ${pairingError}</div>` : "" }
+
+      ${ latestQR ? `<img src="${latestQR}" />` : sessionId ? `<div class="success">✅ Paired!<br>Session ID: <b>${sessionId}</b></div>` : `<p>Waiting for QR…</p>` }
+
+      <p style="font-size:13px; opacity:0.6; margin-top:12px;">QR refreshes automatically. Try again if expired.</p>
+    </div>
+  </body>
+  </html>
+  `);
+});
+
+app.listen(PORT, () => console.log(`🚀 Server Live on port ${PORT}`));
