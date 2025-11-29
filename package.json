@@ -1,7 +1,7 @@
 {
   "name": "qrscan-whatsapp-baileys",
   "version": "1.0.0",
-  "description": "Generate WhatsApp login QR using Baileys and store session in MongoDB",
+  "description": "Generate WhatsApp login QR using Baileys and store session",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
