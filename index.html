@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8"/>
+<title>WhatsApp Pairing (Baileys + Mongo)</title>
+<style>
+  body { font-family: Inter, sans-serif; background:#f7f7f7; padding:20px; }
+  .card { background:white; padding:20px; border-radius:16px; box-shadow:0 2px 8px rgba(0,0,0,0.06); max-width:420px; margin:auto; }
+  button { background:#0070f3; color:white; border:none; padding:12px 18px; border-radius:8px; cursor:pointer; font-size:16px; }
+  #qrImg { width:260px; border-radius:12px; display:none; margin-top:18px; border:1px solid #eee; }
+  .status { font-weight:600; }
+</style>
+</head>
+<body>
+
+<div class="card">
+  <h2>WhatsApp Device Pairing</h2>
+  <p>Status: <span id="statusText" class="status">Idle</span></p>
+  <button id="createBtn" onclick="createSession()">Create Login QR</button>
+  <img id="qrImg" alt="WhatsApp QR"/>
+  <p id="pairedText"></p>
+</div>
+
+<script>
+let eventSource;
+async function createSession(){
+  document.getElementById("statusText").innerText = "Creating session...";
+  document.getElementById("qrImg").style.display = "none";
+  document.getElementById("pairedText").innerText = "";
+  const res = await fetch("/api/create-session",{ method:"POST" });
+  const data = await res.json();
+  listenEvents(data.sessionId);
+}
+
+function listenEvents(sessionId){
+  if(eventSource) eventSource.close();
+  eventSource = new EventSource("/api/events/" + sessionId);
+  eventSource.onmessage = (ev)=>{
+    const msg = JSON.parse(ev.data);
+    if(msg.type === "qr"){
+      document.getElementById("qrImg").src = msg.qrDataUrl;
+      document.getElementById("qrImg").style.display = "block";
+      document.getElementById("statusText").innerText = "QR ready! Scan on WhatsApp.";
+    }
+    if(msg.type === "status" && msg.status === "paired"){
+      document.getElementById("statusText").innerText = "✅ Paired!";
+      document.getElementById("pairedText").innerText = "Session stored in DB with ID: " + msg.sessionDbId;
+      eventSource.close();
+    }
+  };
+}
+</script>
+
+</body>
+</html>
