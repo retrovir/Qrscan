@@ -4,7 +4,7 @@ const mongoose = require("mongoose");
 const qrcode = require("qrcode");
 const fs = require("fs");
 
-const { default: makeWASocket, useSingleFileAuthState, DisconnectReason } = require("@adiwajshing/baileys");
+const { default: makeWASocket, useSingleFileAuthState, DisconnectReason } = require("baileys");
 const path = require("path");
 const { v4: uuidv4 } = require("uuid");
 
