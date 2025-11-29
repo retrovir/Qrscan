@@ -3,11 +3,12 @@
 <head>
 <meta charset="UTF-8"/>
 <title>WhatsApp QR Pairing</title>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet"/>
 <style>
-  body {
+  body{
     background:#0f172a;
     color:white;
-    font-family:poppins, sans-serif;
+    font-family:'Poppins',sans-serif;
     display:flex;
     flex-direction:column;
     align-items:center;
@@ -15,68 +16,88 @@
     height:100vh;
     margin:0;
   }
-  #qr {
-    width:260px;
-    height:260px;
-    border-radius:20px;
-    padding:20px;
-    background:white;
-    box-shadow:0 0 40px rgba(255,255,255,0.2);
-  }
-  input {
-    padding:12px;
+  input{
+    padding:14px;
     border:none;
-    border-radius:10px;
-    width:240px;
-    margin-bottom:20px;
+    border-radius:12px;
+    width:260px;
     font-size:16px;
     outline:none;
+    margin-bottom:18px;
   }
-  #errBox {
-    background:#b91c1c;
-    color:white;
-    padding:12px 18px;
-    border-radius:10px;
-    margin-top:20px;
-    max-width:300px;
+  #qr{
+    width:280px;
+    height:280px;
+    background:white;
+    border-radius:22px;
+    padding:18px;
     display:none;
-    font-size:15px;
+    box-shadow:0 0 30px rgba(255,255,255,0.15);
   }
-  h2{margin-bottom:15px;}
+  #err{
+    background:#dc2626;
+    padding:12px 20px;
+    border-radius:10px;
+    font-size:15px;
+    display:none;
+    max-width:340px;
+    margin-top:18px;
+    text-align:center;
+  }
+  #status{
+    margin-top:14px;
+    font-size:14px;
+    opacity:0.8;
+  }
 </style>
 </head>
 <body>
 
-<input id="session" placeholder="Enter session ID"/>
-<h2>Scan WhatsApp QR</h2>
+<input id="session" placeholder="Enter session ID (example: user123)"/>
 <img id="qr"/>
-<div id="errBox"></div>
+<div id="err"></div>
+<div id="status">Waiting for session ID...</div>
 
 <script>
 const session = document.getElementById("session");
-const qrImg   = document.getElementById("qr");
-const errBox  = document.getElementById("errBox");
+const qrBox  = document.getElementById("qr");
+const errBox = document.getElementById("err");
+const status = document.getElementById("status");
 
-session.addEventListener("change", loadQR);
+session.addEventListener("change",getQR);
 
-async function loadQR(){
+async function getQR(){
   if(!session.value) return;
-  qrImg.src = "";
-  errBox.style.display = "none";
+  qrBox.style.display="none";
+  errBox.style.display="none";
+  status.innerText="Generating QR...";
 
-  const res = await fetch(`/qr/${session.value}`);
-  const data = await res.json();
+  try{
+    const r = await fetch(`/qr/${session.value}`);
+    const d = await r.json();
 
-  if(data.error){
-    errBox.innerText = data.error;
-    errBox.style.display = "block";
-  }
+    if(d.error){
+      errBox.innerText = d.error;
+      errBox.style.display="block";
+      status.innerText="❌ Error received";
+      return;
+    }
 
-  if(data.qr){
-    qrImg.src = data.qr;
+    if(d.qr){
+      qrBox.src = d.qr;
+      qrBox.style.display="block";
+      status.innerText="✅ Scan the QR in WhatsApp!";
+    } else {
+      status.innerText="No QR received yet, retry changing session ID";
+    }
+  }catch(e){
+    errBox.innerText="❗ Frontend failed contacting server. Is backend deployed and running?";
+    errBox.style.display="block";
+    status.innerText="❌ Request Failed";
   }
 }
 </script>
 
 </body>
 </html>
+
