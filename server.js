@@ -1,17 +1,12 @@
-require("dotenv").config();
-const express = require("express");
-const mongoose = require("mongoose");
-const qrcode = require("qrcode");
-const fs = require("fs");
-const path = require("path");
-const { v4: uuidv4 } = require("uuid");
-
-const { default: makeWASocket, DisconnectReason, useMultiFileAuthState } = require("baileys");
+import express from "express";
+import mongoose from "mongoose";
+import makeWASocket, { useMultiFileAuthState } from "@whiskeysockets/baileys";
+import QR from "qrcode";
 
 const app = express();
 app.use(express.json());
 
-// Mongo schema
+// MongoDB Schema
 const SessionSchema = new mongoose.Schema({
   sessionId: String,
   authFolder: String,
@@ -19,70 +14,52 @@ const SessionSchema = new mongoose.Schema({
 });
 const Session = mongoose.model("Session", SessionSchema);
 
-// DB connect
-mongoose.connect(process.env.MONGO_URI);
+mongoose.connect(process.env.MONGO_URL || "mongodb://127.0.0.1:27017/wa_sessions");
 
-// Serve frontend from same backend
-app.get("/", (req, res) => {
-  res.sendFile(path.join(__dirname, "index.html"));
-});
+// Create session + QR + error catch
+app.get("/qr/:id", async (req, res) => {
+  const sessionId = req.params.id;
 
-// Create pairing session
-app.post("/api/create-session", (req, res) => {
-  const sessionId = uuidv4();
-  startSocket(sessionId);
-  res.json({ sessionId });
-});
+  try {
+    const { state, saveCreds } = await useMultiFileAuthState(`creds/${sessionId}`);
 
-// SSE events
-app.get("/api/events/:sessionId", (req, res) => {
-  res.set({ "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" });
-  const { sessionId } = req.params;
-  const session = sessions[sessionId];
-  if (!session) {
-    res.write(`data: ${JSON.stringify({ type: "status", status: "not-found" })}\n\n`);
-    return res.end();
+    const sock = makeWASocket({
+      auth: state,
+      printQRInTerminal: false,
+      browser: ["Render", "Baileys-Session", "1.0.0"]
+    });
+
+    sock.ev.on("connection.update", async (update) => {
+      if(update.qr){
+        const qrImage = await QR.toDataURL(update.qr);
+        res.json({ qr: qrImage, error: null });
+      }
+
+      if(update.connection === "open"){
+        await saveCreds();
+        await Session.create({ sessionId, authFolder: `creds/${sessionId}` });
+        sock.ws.close();
+      }
+
+      if(update.connection === "close" && update.lastDisconnect?.error){
+        res.json({ qr: null, error: "❌ WhatsApp connection failed. Retry with same session ID." });
+        sock.ws.close();
+      }
+    });
+
+    sock.ev.on("error", (err) => {
+      res.json({ qr: null, error: "Baileys Error: " + err.message });
+      sock.ws.close();
+    });
+
+  } catch (err) {
+    res.json({ qr: null, error: "Server Error: " + err.message });
   }
-  const push = (payload) => res.write(`data: ${JSON.stringify(payload)}\n\n`);
-  session.clients.push(push);
-  req.on("close", () => {
-    session.clients = session.clients.filter((fn) => fn !== push);
-  });
 });
 
-// In-memory WA sessions
-const sessions = {};
+// serve UI
+app.use("/", express.static("./"));
 
-async function startSocket(sessionId) {
-  const authFolder = path.join(__dirname, "auth-" + sessionId);
-  if (!fs.existsSync(authFolder)) fs.mkdirSync(authFolder);
-
-  const { state, saveCreds } = await useMultiFileAuthState(authFolder);
-  const sock = makeWASocket({ auth: state, printQRInTerminal: false });
-
-  sessions[sessionId] = { sock, authFolder, clients: [] };
-
-  sock.ev.on("connection.update", async (update) => {
-    const session = sessions[sessionId];
-    if (update.qr) {
-      const dataUrl = await qrcode.toDataURL(update.qr);
-      session.clients.forEach((fn) => fn({ type: "qr", qrDataUrl: dataUrl }));
-    }
-    if (update.connection === "open") {
-      await saveCreds();
-      await Session.create({ sessionId, authFolder })
-      const doc = await Session.create({ sessionId, authFolder });
-session.clients.forEach(fn => fn({ type:"status", status:"paired", sessionDbId: doc._id }));
-    }
-    if (update.connection === "close") {
-      try {
-        sock.end();
-      } catch {}
-      delete sessions[sessionId];
-    }
-  });
-
-  sock.ev.on("creds.update", saveCreds);
-}
-
-app.listen(process.env.PORT || 10000, () => console.log("Server Started"));
+app.listen(process.env.PORT || 3000, () => {
+  console.log("🚀 Server running");
+});
