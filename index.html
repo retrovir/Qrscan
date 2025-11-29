@@ -2,45 +2,79 @@
 <html>
 <head>
 <meta charset="UTF-8"/>
-<title>WhatsApp Pairing</title>
+<title>WhatsApp QR Pairing</title>
 <style>
-  body { font-family: Arial; background:#f7f7f7; padding:20px; text-align:center; }
-  .box { background:white; padding:20px; border-radius:12px; width:350px; margin:auto; box-shadow:0 2px 8px rgba(0,0,0,0.06);}
-  #qr { width:250px; margin-top:15px; border-radius:8px; display:none; }
-  button { background:#0070f3; color:white; padding:10px 16px; border:none; border-radius:6px; cursor:pointer; font-size:16px;}
+  body {
+    background:#0f172a;
+    color:white;
+    font-family:poppins, sans-serif;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    height:100vh;
+    margin:0;
+  }
+  #qr {
+    width:260px;
+    height:260px;
+    border-radius:20px;
+    padding:20px;
+    background:white;
+    box-shadow:0 0 40px rgba(255,255,255,0.2);
+  }
+  input {
+    padding:12px;
+    border:none;
+    border-radius:10px;
+    width:240px;
+    margin-bottom:20px;
+    font-size:16px;
+    outline:none;
+  }
+  #errBox {
+    background:#b91c1c;
+    color:white;
+    padding:12px 18px;
+    border-radius:10px;
+    margin-top:20px;
+    max-width:300px;
+    display:none;
+    font-size:15px;
+  }
+  h2{margin-bottom:15px;}
 </style>
 </head>
 <body>
 
-<div class="box">
-  <h2>WhatsApp Device Login QR</h2>
-  <p id="st">Status: idle</p>
-  <button onclick="go()">Generate QR</button><br>
-  <img id="qr"/>
-  <p id="done"></p>
-</div>
+<input id="session" placeholder="Enter session ID"/>
+<h2>Scan WhatsApp QR</h2>
+<img id="qr"/>
+<div id="errBox"></div>
 
 <script>
-let es;
-async function go(){
-  document.getElementById("st").innerText = "Status: requesting QR...";
-  const r = await fetch("/api/create-session",{method:"POST"});
-  const d = await r.json();
-  if(es) es.close();
-  es = new EventSource("/api/events/" + d.sessionId);
-  es.onmessage = (m)=>{
-    const x = JSON.parse(m.data);
-    if(x.type==="qr"){
-      document.getElementById("qr").src = x.qrDataUrl;
-      document.getElementById("qr").style.display="block";
-      document.getElementById("st").innerText="Status: scan QR on WhatsApp";
-    }
-    if(x.type==="status" && x.status==="paired"){
-      document.getElementById("st").innerText="Status: ✅ paired!";
-      document.getElementById("done").innerText="Session ID stored in DB: " + x.sessionDbId;
-      es.close();
-    }
-  };
+const session = document.getElementById("session");
+const qrImg   = document.getElementById("qr");
+const errBox  = document.getElementById("errBox");
+
+session.addEventListener("change", loadQR);
+
+async function loadQR(){
+  if(!session.value) return;
+  qrImg.src = "";
+  errBox.style.display = "none";
+
+  const res = await fetch(`/qr/${session.value}`);
+  const data = await res.json();
+
+  if(data.error){
+    errBox.innerText = data.error;
+    errBox.style.display = "block";
+  }
+
+  if(data.qr){
+    qrImg.src = data.qr;
+  }
 }
 </script>
 
