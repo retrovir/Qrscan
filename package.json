@@ -1,5 +1,5 @@
 {
-  "name": "whatsapp-qr-pair",
+  "name": "wa-qr-auto-final",
   "version": "1.0.0",
   "type": "module",
   "scripts": {
@@ -9,7 +9,6 @@
     "@whiskeysockets/baileys": "latest",
     "express": "latest",
     "mongoose": "latest",
-    "qrcode": "latest",
-    "cors": "latest"
+    "qrcode": "latest"
   }
 }
