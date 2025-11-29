@@ -70,8 +70,9 @@ async function startSocket(sessionId) {
     }
     if (update.connection === "open") {
       await saveCreds();
-      await Session.create({ sessionId, authFolder });
-      session.clients.forEach((fn) => fn({ type: "status", status: "paired", sessionDbId: sessionId }));
+      await Session.create({ sessionId, authFolder })
+      const doc = await Session.create({ sessionId, authFolder });
+session.clients.forEach(fn => fn({ type:"status", status:"paired", sessionDbId: doc._id }));
     }
     if (update.connection === "close") {
       try {
