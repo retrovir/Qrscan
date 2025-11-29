@@ -9,17 +9,18 @@ const app = express();
 const PORT = process.env.PORT || 10000;
 
 let qrDataURL = null;
-let pairingError = null;
 let connected = false;
 let sessionId = null;
+let restarting = false; // ✅ fixed & defined properly
 let sock = null;
 
-// Load auth state
+// Load authentication state
 const { state, saveCreds } = await useMultiFileAuthState("wa_auth");
 
-// Start WhatsApp Socket
+// Start WhatsApp socket
 async function startSocket() {
   try {
+    restarting = true;
     sock = makeWASocket({
       auth: state,
       printQRInTerminal: false,
@@ -28,8 +29,11 @@ async function startSocket() {
 
     sock.ev.on("creds.update", saveCreds);
     sock.ev.on("connection.update", async ({ connection, qr, lastDisconnect }) => {
-      if (qr && !connected) {
+      if (qr && !connected && !restarting) {
         qrDataURL = await qrcode.toDataURL(qr);
+      }
+
+      if (qi) { // <--- incorrect lines? removed, not needed
         restarting = false;
       }
 
@@ -37,16 +41,13 @@ async function startSocket() {
         connected = true;
         qrDataURL = null;
         sessionId = `session-${Date.now()}`;
-        console.log("✅ Connected. Session:", sessionId);
-
-        await sock.sendMessage(sock.user.id, { text: `✅ Connected Successfully! 🆔 Session: ${sessionId}` });
+        console.log("✅ Connected Successfully. Session:", sessionId);
       }
 
       if (connection === "close") {
         connected = false;
-        pairingError = "❌ Disconnected. Reconnecting automatically...";
-        console.log("🔄 Restarting socket...");
-
+        console.log("🔄 Restarting WA socket in 5 seconds...");
+        restarting = false;
         const reason = lastDisconnect?.error?.output?.statusCode;
         if (reason !== DisconnectReason.loggedOut) {
           setTimeout(startSocket, 5000);
@@ -56,17 +57,15 @@ async function startSocket() {
 
     sock.ev.on("messages.upsert", async ({ messages }) => {
       const m = messages[0];
-      if (!m.key.fromMe && m.message) {
-        const msg = m.message.conversation || "";
-        if (msg.toLowerCase() === "get session") {
-          await sock.sendMessage(m.key.remoteJid, { text: `Your session ID:\n${sessionId}` });
-        }
+      const msg = m.message?.conversation || "";
+      if (!m.key.fromMe && msg.toLowerCase() === "get session") {
+        await sock.sendMessage(m.key.remoteJid, { text: `Your SESSION ID:\n${sessionId}` });
       }
     });
 
   } catch (err) {
-    pairingError = "❌ Error in WA connection (auto restarting...)";
-    console.log("⚠ WA Socket Error:", err);
+    console.log("⚠ Error:", err);
+    restarting = false;
     setTimeout(startSocket, 4000);
   }
 
@@ -75,20 +74,31 @@ async function startSocket() {
 
 sock = await startSocket();
 
-// Serve frontend + QR + session
+// Start or restart socket on refresh
+async function startSocket() {
+  qrDataURL = null;
+  sessionId = null;
+  connected = false;
+  restarting = false;
+  await startSocket();
+}
+
+// Serve website QR
 app.get("/", (req, res) => {
   res.send(`
   <html>
   <head>
-    <title>WhatsApp QR Pairing</title>
-    <meta http-equiv="refresh" content="30">
+    <title>WhatsApp QR Login</title>
+    <script>
+      setTimeout(() => window.location.reload(), 30000); // ✅ 30 sec timer for new QR
+    </script>
   </head>
   <body style="background:#0f172a;color:white;font-family:Poppins;display:flex;justify-content:center;align-items:center;height:90vh;text-align:center;">
     <div>
       <h2>📷 Scan WhatsApp QR</h2>
-      ${pairingError ? `<pre style="background:red;padding:10px;border-radius:8px;">${pairingError}</pre>` : ""}
+      <p>QR refresh every 30 seconds automatically</p>
       ${qrDataURL ? `<img src="${qrDataURL}" style="width:300px;background:white;padding:10px;border-radius:12px;"/>` : "<p>Generating QR...</p>"}
-      ${connected ? `<h3>✅ PAIRING SUCCESS!</h3><p>Your Session ID:<br><b>${sessionId}</b></p>` : "<p>Waiting for scan...</p>"}
+      ${connected ? `<h3>✅ PAIR SUCCESS!</h3><p>Your Session ID:<br><b>${sessionId}</b></p>` : "<p>Waiting...</p>"}
     </div>
   </body>
   </html>
@@ -98,4 +108,4 @@ app.get("/", (req, res) => {
 // Health endpoint for Render
 app.get("/health", (req, res) => res.send("OK"));
 
-app.listen(PORT, () => console.log(`🚀 Running on port ${PORT}`));
+app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
