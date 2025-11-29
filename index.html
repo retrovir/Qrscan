@@ -2,50 +2,43 @@
 <html>
 <head>
 <meta charset="UTF-8"/>
-<title>WhatsApp Pairing (Baileys + Mongo)</title>
+<title>WhatsApp Pairing</title>
 <style>
-  body { font-family: Inter, sans-serif; background:#f7f7f7; padding:20px; }
-  .card { background:white; padding:20px; border-radius:16px; box-shadow:0 2px 8px rgba(0,0,0,0.06); max-width:420px; margin:auto; }
-  button { background:#0070f3; color:white; border:none; padding:12px 18px; border-radius:8px; cursor:pointer; font-size:16px; }
-  #qrImg { width:260px; border-radius:12px; display:none; margin-top:18px; border:1px solid #eee; }
-  .status { font-weight:600; }
+  body { font-family: Arial; background:#f7f7f7; padding:20px; text-align:center; }
+  .box { background:white; padding:20px; border-radius:12px; width:350px; margin:auto; box-shadow:0 2px 8px rgba(0,0,0,0.06);}
+  #qr { width:250px; margin-top:15px; border-radius:8px; display:none; }
+  button { background:#0070f3; color:white; padding:10px 16px; border:none; border-radius:6px; cursor:pointer; font-size:16px;}
 </style>
 </head>
 <body>
 
-<div class="card">
-  <h2>WhatsApp Device Pairing</h2>
-  <p>Status: <span id="statusText" class="status">Idle</span></p>
-  <button id="createBtn" onclick="createSession()">Create Login QR</button>
-  <img id="qrImg" alt="WhatsApp QR"/>
-  <p id="pairedText"></p>
+<div class="box">
+  <h2>WhatsApp Device Login QR</h2>
+  <p id="st">Status: idle</p>
+  <button onclick="go()">Generate QR</button><br>
+  <img id="qr"/>
+  <p id="done"></p>
 </div>
 
 <script>
-let eventSource;
-async function createSession(){
-  document.getElementById("statusText").innerText = "Creating session...";
-  document.getElementById("qrImg").style.display = "none";
-  document.getElementById("pairedText").innerText = "";
-  const res = await fetch("/api/create-session",{ method:"POST" });
-  const data = await res.json();
-  listenEvents(data.sessionId);
-}
-
-function listenEvents(sessionId){
-  if(eventSource) eventSource.close();
-  eventSource = new EventSource("/api/events/" + sessionId);
-  eventSource.onmessage = (ev)=>{
-    const msg = JSON.parse(ev.data);
-    if(msg.type === "qr"){
-      document.getElementById("qrImg").src = msg.qrDataUrl;
-      document.getElementById("qrImg").style.display = "block";
-      document.getElementById("statusText").innerText = "QR ready! Scan on WhatsApp.";
+let es;
+async function go(){
+  document.getElementById("st").innerText = "Status: requesting QR...";
+  const r = await fetch("/api/create-session",{method:"POST"});
+  const d = await r.json();
+  if(es) es.close();
+  es = new EventSource("/api/events/" + d.sessionId);
+  es.onmessage = (m)=>{
+    const x = JSON.parse(m.data);
+    if(x.type==="qr"){
+      document.getElementById("qr").src = x.qrDataUrl;
+      document.getElementById("qr").style.display="block";
+      document.getElementById("st").innerText="Status: scan QR on WhatsApp";
     }
-    if(msg.type === "status" && msg.status === "paired"){
-      document.getElementById("statusText").innerText = "✅ Paired!";
-      document.getElementById("pairedText").innerText = "Session stored in DB with ID: " + msg.sessionDbId;
-      eventSource.close();
+    if(x.type==="status" && x.status==="paired"){
+      document.getElementById("st").innerText="Status: ✅ paired!";
+      document.getElementById("done").innerText="Session ID stored in DB: " + x.sessionDbId;
+      es.close();
     }
   };
 }
