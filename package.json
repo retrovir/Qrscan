@@ -1,5 +1,5 @@
 {
-  "name": "wa-qr-scan",
+  "name": "whatsapp-qr-pair",
   "version": "1.0.0",
   "type": "module",
   "scripts": {
@@ -9,6 +9,7 @@
     "@whiskeysockets/baileys": "latest",
     "express": "latest",
     "mongoose": "latest",
-    "qrcode": "latest"
+    "qrcode": "latest",
+    "cors": "latest"
   }
 }
