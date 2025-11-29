@@ -22,6 +22,12 @@ if (!mongoURL) {
 await mongoose.connect(mongoURL);
 console.log("✅ Connected to MongoDB");
 
+// Root redirect to default session
+app.get("/", (req,res) => {
+  // Change "defaultSession" to any default session ID you want
+  res.redirect("/qr/defaultSession");
+});
+
 // QR endpoint
 app.get("/qr/:id", async (req, res) => {
   const sessionId = req.params.id;
@@ -65,7 +71,7 @@ app.get("/qr/:id", async (req, res) => {
             <title>WhatsApp QR</title>
             <meta http-equiv="refresh" content="30">
             <style>
-              body{display:flex;justify-content:center;align-items:center;height:100vh;background:#0f172a;flex-direction:column;}
+              body{display:flex;justify-content:center;align-items:center;height:100vh;flex-direction:column;background:#0f172a;}
               img{width:300px;height:300px;padding:20px;background:white;border-radius:20px;margin-bottom:15px;}
               p{color:white;font-family:sans-serif;margin:5px;}
             </style>
