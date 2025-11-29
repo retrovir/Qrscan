@@ -1,4 +1,6 @@
-import makeWASocket, { useMultiFileAuthState } from "@whiskeysockets/baileys";
+import makeWASocket from "@whiskeysockets/baileys";
+import { Boom } from "@hapi/boom";
+import { useMultiFileAuthState } from "@whiskeysockets/baileys";
 import qrcode from "qrcode";
 import express from "express";
 import dotenv from "dotenv";
@@ -8,78 +10,123 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 10000;
 
-const { state: authState } = await useMultiFileAuthState("session_auth");
-
-let latestQR = null;
+let qrDataURL = null;
 let pairingError = null;
-let sessionId = null;
 let connected = false;
+let restarting = false;
+let sessionId = null;
 
-const sock = makeWASocket({
-  auth: authState,
-  printQRInTerminal: false,
-  browser: ["Render", "Chrome", "1.0"]
-});
+// Load auth state
+const { state } = await useMultiFileAuthState("wa_auth");
 
-// ✅ Send session ID in WhatsApp once paired
-sock.ev.on("connection.update", async (update) => {
-  const { qr, connection, lastDisconnect } = update;
+// Function to start socket with auto-restart
+async function startSocket() {
+  restarting = false;
+  const sock = makeWASocket({
+    auth: state,
+    printQRInTerminal: false,
+    browser: ["Render", "Chrome", "1.0"],
+    connectTimeoutMs: 60000,
+    retryRequestDelayMs: 250,
+    keepAliveIntervalMs: 25000,
+    emitOwnEvents: true
+  });
 
-  try {
-    if (qr && !connected) {
-      latestQR = await qrcode.toDataURL(qr);
-    }
+  // Handle connection updates
+  sock.ev.on("connection.update", async (update) => {
+    const { qr, connection, lastDisconnect } = update;
 
-    if (connection === "open" && !connected) {
+    if (connection === "open") {
       connected = true;
-      connected = true;
+      qrDataURL = null;
       sessionId = `session-${Date.now()}`;
 
-      console.log(`✅ Connected | Session ID: ${sessionId}`);
+      console.log(`✅ Device paired: ${sessionId}`);
 
-      // 📩 Send message to yourself in WhatsApp
       await sock.sendMessage(sock.user.id, {
-        text: `✅ *WhatsApp Paired Successfully!*\n\n🆔 *Your Session ID:*\n${sessionId}\n\nThis session is now active 🔥`
+        text: `✅ *WhatsApp Paired Successfully!*\n\n🆔 *Session ID:*\n${sessionId}\n\nYou can now close the page 🚀`
       });
-
     }
 
-    if (lastDisconnect?.error && !connected) {
-      pairingError = lastDisconnect.error.message;
-      console.error(pairingError);
+    if (qr && !connected) {
+      qrDataURL = await qrcode.toDataURL(qr);
     }
 
-  } catch (err) {
-    pairingError = err.message;
-    console.error(err.message);
+    if (connection === "close") {
+      const err = lastDisconnect?.error;
+      const boom = Boom.isBoom(err) ? err : new Boom(err);
+
+      console.error(`⚠ Disconnected:`, boom.output?.statusCode);
+
+      if (boom.output?.statusCode !== 401 && !restarting) {
+        restarting = true;
+        connected = false;
+        qrDataURL = null;
+        pairingError = `Connection failed (Auto-Restarting...)`;
+        console.log("♻ Restarting WA socket in 5 seconds...");
+        setTimeout(startSocket, 5000);
+      }
+    }
+  });
+
+  // Stream failure fix — restart if Baileys throws stream error
+  sock.ev.on("stream.error", async () => {
+    if (!restarting) {
+      restarting = true;
+      pairingError = "❌ Stream Error (Restarting automatically...)";
+      console.log("🔄 Restarting socket due to stream crash...");
+      sock.ws.close();
+      setTimeout(startSocket, 4000);
+    }
+  });
+
+  return sock;
+}
+
+let sock = await startSocket();
+
+// Auto generate new QR every 30 sec if not connected
+setInterval(() => {
+  if (!connected && !restarting) {
+    console.log("⌛ QR expired — requesting new one...");
+    qrDataURL = null;
+    restarting = true;
+    sock.ws.close();
+    setTimeout(async () => {
+      sock = await startSocket();
+    }, 2000);
   }
-});
+}, 30000);
 
-// ✅ If paired, redirect user away from UI
 app.get("/", (req, res) => {
-  if (connected) {
-    return res.send(`
-    <html>
-    <body style="background:#0f172a;color:white;display:flex;justify-content:center;align-items:center;height:90vh;font-family:Poppins;text-align:center;">
-      <div>
-        <h2>✅ Connected Successfully!</h2>
-        <p>Your session ID has been sent to you in WhatsApp 🚀</p>
-        <p>You can now close this page.</p>
-      </div>
-    </body>
-    </html>
-    `);
-  }
-
   res.send(`
   <html>
-  <head><title>QR Scan</title></head>
+  <head>
+    <title>WhatsApp QR Login</title>
+    <meta http-equiv="refresh" content="30">
+  </head>
   <body style="background:#0f172a;color:white;display:flex;justify-content:center;align-items:center;height:90vh;font-family:Poppins;text-align:center;">
-    <div>
-      <h2>Scan WhatsApp QR</h2>
-      ${pairingError ? `<p style="background:red;padding:10px;border-radius:8px;">❌ Error:<br>${pairingError}</p>` : ""}
-      ${latestQR ? `<img src="${latestQR}" style="width:260px;border-radius:12px;background:white;padding:12px;"/>` : `<p>Generating QR...</p>`}
-      <p style="opacity:0.5;font-size:12px;">Refresh if expired</p>
+    <div style="padding:20px;">
+      <h2>🔍 Scan WhatsApp QR</h2>
+
+      ${
+        pairingError
+          ? `<p style="background:red;padding:12px;border-radius:8px;white-space:pre;">${pairingError}</p>`
+          : ""
+      }
+
+      ${
+        qrDataURL
+          ? `<img src="${qrDataURL}" style="width:270px;border-radius:12px;background:white;padding:12px;"/>`
+          : `<p>⏳ Generating fresh QR...</p>`
+      }
+
+      <p style="opacity:0.6;font-size:13px;">Page will auto-refresh & regenerate QR every 30 sec</p>
+      ${
+        sessionId && connected
+          ? `<h3>✅ Connected! (Check WhatsApp for Session)</h3>`
+          : ""
+      }
     </div>
   </body>
   </html>
@@ -88,4 +135,5 @@ app.get("/", (req, res) => {
 
 app.get("/health", (req, res) => res.send("OK"));
 
-app.listen(PORT, () => console.log(`🚀 Running on port ${PORT}`));
+app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+  
