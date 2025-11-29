@@ -1,14 +1,15 @@
 {
-  "name": "whatsapp-qr-scan",
+  "name": "wa-qr-pairing",
   "version": "1.0.0",
   "type": "module",
+  "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "latest",
-    "qrcode": "latest",
     "express": "latest",
+    "qrcode": "latest",
     "dotenv": "latest"
   }
 }
