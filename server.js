@@ -1,5 +1,5 @@
 import express from "express";
-import makeWASocket, { DisconnectReason, fetchLatestBaileysVersion } from "@whiskeysockets/baileys";
+import makeWASocket, { DisconnectReason, fetchLatestBaileysVersion, useInMemoryAuthState } from "@whiskeysockets/baileys";
 import QRCode from "qrcode";
 
 const app = express();
@@ -8,10 +8,12 @@ let wa = null;
 
 async function startWA() {
   const { version } = await fetchLatestBaileysVersion();
+  const { state } = useInMemoryAuthState(); // ✅ in-memory auth state
+
   wa = makeWASocket({
     version,
     printQRInTerminal: false,
-    auth: null
+    auth: state // ✅ must not be null
   });
 
   wa.ev.on("connection.update", async ({ qr, connection, lastDisconnect }) => {
@@ -22,8 +24,7 @@ async function startWA() {
     if (connection === "open") {
       console.log("Paired ✅");
 
-      // Generate session string and send to paired chat itself
-      const session = Buffer.from(JSON.stringify(wa.authState?.creds || {})).toString("base64");
+      const session = Buffer.from(JSON.stringify(wa.authState.creds)).toString("base64");
 
       await wa.sendMessage("me", {
         text: `✅ Paired with :contentReference[oaicite:0]{index=0}\n\nSession:\n${session}`
@@ -43,7 +44,7 @@ app.get("/", (req, res) => {
   res.send(`
     <html>
     <body style="text-align:center;font-family:sans-serif;padding:20px">
-      <h2>WhatsApp QR Pairing</h2>
+      <h2>Scan QR to pair with WhatsApp</h2>
       <div>${qrImage ? `<img src="${qrImage}" width="260"/>` : "Generating QR..."}</div>
       ${qrImage ? `<h3>Refresh in <span id="t">30</span>s</h3>` : ""}
       <script>
@@ -60,5 +61,4 @@ app.get("/", (req, res) => {
 });
 
 startWA();
-app.listen(3000, ()=>console.log("Server Live 🚀"));
-      
+app.listen(process.env.PORT || 3000, ()=>console.log("Server Live 🚀"));
