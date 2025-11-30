@@ -8,9 +8,9 @@
   },
   "dependencies": {
     "@whiskeysockets/baileys": "latest",
+    "@adiwajshing/keyed-db": "latest",
     "express": "latest",
-    "qrcode": "latest",
-    "fs-extra": "latest"
+    "qrcode": "latest"
   },
   "engines": {
     "node": ">=18"
