@@ -1,111 +1,126 @@
-import makeWASocket, { DisconnectReason, useMultiFileAuthState } from "@whiskeysockets/baileys";
-import qrcode from "qrcode";
 import express from "express";
-import dotenv from "dotenv";
-
-dotenv.config();
+import makeWASocket, {
+  useMultiFileAuthState,
+  DisconnectReason,
+} from "@whiskeysockets/baileys";
+import QRCode from "qrcode";
+import fs from "fs";
 
 const app = express();
-const PORT = process.env.PORT || 10000;
+let currentQR = null;
+let qrCount = 0;
+let socketInstance = null;
 
-let qrDataURL = null;
-let connected = false;
-let sessionId = null;
-let restarting = false; // ✅ fixed & defined properly
-let sock = null;
+// Connect to WhatsApp
+async function connectWA() {
+  const { state, saveCreds } = await useMultiFileAuthState("/mnt/storage/auth");
 
-// Load authentication state
-const { state, saveCreds } = await useMultiFileAuthState("wa_auth");
+  const sock = makeWASocket({
+    auth: state,
+    printQRInTerminal: false,
+    browser: ["Render-WA-QR", "Chrome", "1.0"],
+  });
 
-// Start WhatsApp socket
-async function startSocket() {
-  try {
-    restarting = true;
-    sock = makeWASocket({
-      auth: state,
-      printQRInTerminal: false,
-      browser: ["Render", "Chrome", "1.0"],
-    });
+  socketInstance = sock;
+  socketInstance.ev.on("connection.update", async (update) => {
+    const { qr, connection, lastDisconnect } = update;
 
-    sock.ev.on("creds.update", saveCreds);
-    sock.ev.on("connection.update", async ({ connection, qr, lastDisconnect }) => {
-      if (qr && !connected && !restarting) {
-        qrDataURL = await qrcode.toDataURL(qr);
+    if (qr) {
+      currentQR = await QRCode.toDataURL(qr);
+      qrCount++;
+      qrCount = qrCount % 30; // reset at 30
+      qrCount++;
+    }
+
+    if (connection === "open") {
+      console.log("✅ Paired successfully!");
+
+      // Read creds file and send to yourself
+      const credsData = fs.readFileSync(
+        "/mnt/storage/auth/creds.json",
+        "utf8"
+      );
+
+      const yourNumber = "91XXXXXXXXXX@s.whatsapp.net"; // CHANGE to your WA
+      await socketInstance.sendMessage(yourNumber, {
+        text: `✅ WhatsApp connected!\n\nCreds:\n${credsData}`,
+      });
+
+      currentQR = null; // stop QR generation once paired
+    }
+
+    if (connection === "close") {
+      const shouldReconnect =
+        lastDisconnect?.error?.output?.statusCode !==
+        DisconnectReason.loggedOut;
+      if (shouldReconnect) {
+        connectWA();
       }
-
-      if (qi) { // <--- incorrect lines? removed, not needed
-        restarting = false;
-      }
-
-      if (connection === "open") {
-        connected = true;
-        qrDataURL = null;
-        sessionId = `session-${Date.now()}`;
-        console.log("✅ Connected Successfully. Session:", sessionId);
-      }
-
-      if (connection === "close") {
-        connected = false;
-        console.log("🔄 Restarting WA socket in 5 seconds...");
-        restarting = false;
-        const reason = lastDisconnect?.error?.output?.statusCode;
-        if (reason !== DisconnectReason.loggedOut) {
-          setTimeout(startSocket, 5000);
-        }
-      }
-    });
-
-    sock.ev.on("messages.upsert", async ({ messages }) => {
-      const m = messages[0];
-      const msg = m.message?.conversation || "";
-      if (!m.key.fromMe && msg.toLowerCase() === "get session") {
-        await sock.sendMessage(m.key.remoteJid, { text: `Your SESSION ID:\n${sessionId}` });
-      }
-    });
-
-  } catch (err) {
-    console.log("⚠ Error:", err);
-    restarting = false;
-    setTimeout(startSocket, 4000);
-  }
-
-  return sock;
+    }
+    await saveCreds();
+  });
 }
 
-sock = await startSocket();
-
-// Start or restart socket on refresh
-async function startSocket() {
-  qrDataURL = null;
-  sessionId = null;
-  connected = false;
-  restarting = false;
-  await startSocket();
-}
-
-// Serve website QR
+// Serve QR + Timer page
 app.get("/", (req, res) => {
-  res.send(`
-  <html>
-  <head>
-    <title>WhatsApp QR Login</title>
-    <script>
-      setTimeout(() => window.location.reload(), 30000); // ✅ 30 sec timer for new QR
-    </script>
-  </head>
-  <body style="background:#0f172a;color:white;font-family:Poppins;display:flex;justify-content:center;align-items:center;height:90vh;text-align:center;">
-    <div>
-      <h2>📷 Scan WhatsApp QR</h2>
-      <p>QR refresh every 30 seconds automatically</p>
-      ${qrDataURL ? `<img src="${qrDataURL}" style="width:300px;background:white;padding:10px;border-radius:12px;"/>` : "<p>Generating QR...</p>"}
-      ${connected ? `<h3>✅ PAIR SUCCESS!</h3><p>Your Session ID:<br><b>${sessionId}</b></p>` : "<p>Waiting...</p>"}
-    </div>
-  </body>
-  </html>
-  `);
+  const html = `
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>WA QR Pairing</title>
+<style>
+  body {
+    font-family: Arial, sans-serif;
+    text-align: center;
+    padding: 20px;
+  }
+  img {
+    width: 280px;
+    border-radius: 12px;
+    box-shadow: 0 0 12px rgba(0,0,0,0.15);
+  }
+  #timer {
+    font-size: 20px;
+    margin-top: 15px;
+    font-weight: bold;
+  }
+</style>
+</head>
+<body>
+  <h2>Scan WhatsApp QR</h2>
+  <div>
+    ${
+      currentQR
+        ? `<img id="qrImg" src="${currentQR}" />`
+        : "<p>✅ Already Paired — Restart service to regenerate QR</p>"
+    }
+  </div>
+  ${
+    currentQR
+      ? `<div id="timer">Refreshing in: <span id="countdown">30</span>s</div>`
+      : ""
+  }
+  <script>
+    let time = 30;
+    const cd = document.getElementById("countdown");
+    const interval = setInterval(()=>{
+      time--;
+      if(cd) cd.textContent = time;
+      if(time<=0){
+        clearInterval(interval);
+        location.reload();
+      }
+    },1000);
+  </script>
+</body>
+</html>
+  `;
+  res.send(html);
 });
 
-// Health endpoint for Render
-app.get("/health", (req, res) => res.send("OK"));
-
-app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+// Kick off WA connection + start server
+connectWA();
+app.listen(3000, () =>
+  console.log("🚀 Service live on main URL: 3000")
+);
