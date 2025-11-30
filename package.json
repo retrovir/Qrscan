@@ -1,16 +1,15 @@
 {
-  "name": "render-wa-qr-generator",
+  "name": "wa-backend-qr",
   "version": "1.0.0",
   "main": "server.js",
   "type": "module",
-  "scripts": {
-    "start": "node server.js"
-  },
   "dependencies": {
     "@whiskeysockets/baileys": "latest",
-    "@adiwajshing/keyed-db": "latest",
     "express": "latest",
     "qrcode": "latest"
+  },
+  "scripts": {
+    "start": "node server.js"
   },
   "engines": {
     "node": ">=18"
