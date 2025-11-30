@@ -1,41 +1,51 @@
 import express from "express";
-import makeWASocket, { DisconnectReason, fetchLatestBaileysVersion, useInMemoryAuthState } from "@whiskeysockets/baileys";
+import makeWASocket, {
+  useMultiFileAuthState,
+  DisconnectReason,
+  fetchLatestBaileysVersion
+} from "@whiskeysockets/baileys";
 import QRCode from "qrcode";
 
 const app = express();
-let qrImage = null;
-let wa = null;
+let qrHTML = "Generating QR...";
 
-async function startWA() {
+async function startWASocket() {
+  // Auth stored in RAM-friendly tmp folder
+  const { state, saveCreds } = await useMultiFileAuthState("/tmp/wa-auth");
+
   const { version } = await fetchLatestBaileysVersion();
-  const { state } = useInMemoryAuthState(); // ✅ in-memory auth state
 
-  wa = makeWASocket({
+  const sock = makeWASocket({
     version,
-    printQRInTerminal: false,
-    auth: state // ✅ must not be null
+    auth: state,
+    printQRInTerminal: false
   });
 
-  wa.ev.on("connection.update", async ({ qr, connection, lastDisconnect }) => {
+  sock.ev.on("creds.update", saveCreds);
+
+  sock.ev.on("connection.update", async ({ qr, connection, lastDisconnect }) => {
     if (qr) {
-      qrImage = await QRCode.toDataURL(qr);
+      const qrImg = await QRCode.toDataURL(qr);
+      qrHTML = `<img src="${qrImg}" width="250"/><br><h3>Refreshing in <span id="t">30</span>s</h3>`;
     }
 
     if (connection === "open") {
-      console.log("Paired ✅");
+      console.log("PAIRED SUCCESSFULLY ✅");
 
-      const session = Buffer.from(JSON.stringify(wa.authState.creds)).toString("base64");
+      // Create session string
+      const session = Buffer.from(JSON.stringify(state.creds)).toString("base64");
 
-      await wa.sendMessage("me", {
-        text: `✅ Paired with :contentReference[oaicite:0]{index=0}\n\nSession:\n${session}`
-      });
+      // Send to your own WhatsApp automatically
+      await sock.sendMessage("me", { text: `Your Session:\n${session}` });
 
-      qrImage = null;
+      qrHTML = "<h2>PAIRED SUCCESSFULLY 🎉</h2>";
     }
 
     if (connection === "close") {
-      const reconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
-      if (reconnect) startWA();
+      const shouldReconnect =
+        lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
+
+      if (shouldReconnect) startWASocket();
     }
   });
 }
@@ -43,22 +53,21 @@ async function startWA() {
 app.get("/", (req, res) => {
   res.send(`
     <html>
-    <body style="text-align:center;font-family:sans-serif;padding:20px">
-      <h2>Scan QR to pair with WhatsApp</h2>
-      <div>${qrImage ? `<img src="${qrImage}" width="260"/>` : "Generating QR..."}</div>
-      ${qrImage ? `<h3>Refresh in <span id="t">30</span>s</h3>` : ""}
+    <body style="text-align:center;font-family:sans-serif;padding-top:40px">
+      <h2>WhatsApp QR Login</h2>
+      ${qrHTML}
       <script>
-        let s=30;
+        let s = 30;
         setInterval(()=>{
-          s--;
-          document.getElementById('t').innerText=s;
-          if(s<=0)location.reload();
-        },1000);
+          const el = document.getElementById('t');
+          if (el) el.innerText = s--;
+          if (s <= 0) location.reload();
+        }, 1000);
       </script>
     </body>
     </html>
   `);
 });
 
-startWA();
-app.listen(process.env.PORT || 3000, ()=>console.log("Server Live 🚀"));
+startWASocket();
+app.listen(process.env.PORT || 3000, () => console.log("Server Running 🚀"));
