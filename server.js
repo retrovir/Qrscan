@@ -1,73 +1,96 @@
 import express from "express";
-import makeWASocket, {
-  useMultiFileAuthState,
-  DisconnectReason,
-  fetchLatestBaileysVersion
-} from "@whiskeysockets/baileys";
-import QRCode from "qrcode";
+import makeWASocket, { useMultiFileAuthState, DisconnectReason, jidDecode } from "@whiskeysockets/baileys";
+import qrcode from "qrcode";
+import dotenv from "dotenv";
+
+dotenv.config();
 
 const app = express();
-let qrHTML = "Generating QR...";
+app.use(express.json());
 
-async function startWASocket() {
-  // Auth stored in RAM-friendly tmp folder
-  const { state, saveCreds } = await useMultiFileAuthState("/tmp/wa-auth");
+let sessionId = null;
+let qrData = null;
+let connected = false;
+let restarting = false;
 
-  const { version } = await fetchLatestBaileysVersion();
+async function startSocket() {
+  try {
+    const { state, saveCreds } = await useMultiFileAuthState("auth");
+    const sock = makeWASocket({ auth: state, printQRInTerminal: false });
 
-  const sock = makeWASocket({
-    version,
-    auth: state,
-    printQRInTerminal: false
-  });
+    sock.ev.on("creds.update", saveCreds);
 
-  sock.ev.on("creds.update", saveCreds);
+    // QR generator
+    sock.ev.on("connection.update", async (update) => {
+      const { connection, lastDisconnect, qr } = update;
 
-  sock.ev.on("connection.update", async ({ qr, connection, lastDisconnect }) => {
-    if (qr) {
-      const qrImg = await QRCode.toDataURL(qr);
-      qrHTML = `<img src="${qrImg}" width="250"/><br><h3>Refreshing in <span id="t">30</span>s</h3>`;
-    }
+      if (qr) {
+        qrData = await qrcode.toDataURL(qr);
+        console.log("🔄 NEW QR GENERATED");
+      }
 
-    if (connection === "open") {
-      console.log("PAIRED SUCCESSFULLY ✅");
+      if (connection === "open") {
+        connected = true;
+        restarting = false;
+        sessionId = `session-${Date.now()}`;  // ✅ show on website
+        console.log("✅ PAIRED SUCCESSFULLY");
+      }
 
-      // Create session string
-      const session = Buffer.from(JSON.stringify(state.creds)).toString("base64");
+      if (connection === "close" && !restarting) {
+        const reason = lastDisconnect?.error?.output?.statusCode;
+        const shouldRestart = reason !== DisconnectReason.loggedOut;
 
-      // Send to your own WhatsApp automatically
-      await sock.sendMessage("me", { text: `Your Session:\n${session}` });
+        if (shouldRestart) {
+          restarting = true;
+          connected = false;
+          console.log("⚠ Restarting socket in 5 sec...");
+          setTimeout(() => startSocket(), 5000);
+        }
+      }
+    });
 
-      qrHTML = "<h2>PAIRED SUCCESSFULLY 🎉</h2>";
-    }
+    // Listen for WhatsApp commands
+    sock.ev.on("messages.upsert", async ({ messages }) => {
+      const m = messages[0];
+      if (!connected || !sessionId) return; // ✅ prevent premature send
 
-    if (connection === "close") {
-      const shouldReconnect =
-        lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
+      const jid = m.key.remoteJid;
+      if (!jid) return;
 
-      if (shouldReconnect) startWASocket();
-    }
-  });
+      const msg = m.message?.conversation?.toLowerCase() || "";
+
+      if (!m.key.fromMe && msg === "get session") {
+        const decoded = jidDecode(jid);
+        const user = decoded?.user || "unknown";
+        const server = decoded?.server || "unknown";
+
+        await sock.sendMessage(jid, { text: `✅ Session ID: ${sessionId}\nJID: ${user}@${server}` });
+      }
+    });
+
+  } catch (err) {
+    console.log("❌ SOCKET ERROR:", err.message);
+    setTimeout(() => startSocket(), 5000);
+  }
 }
 
-app.get("/", (req, res) => {
-  res.send(`
-    <html>
-    <body style="text-align:center;font-family:sans-serif;padding-top:40px">
-      <h2>WhatsApp QR Login</h2>
-      ${qrHTML}
-      <script>
-        let s = 30;
-        setInterval(()=>{
-          const el = document.getElementById('t');
-          if (el) el.innerText = s--;
-          if (s <= 0) location.reload();
-        }, 1000);
-      </script>
-    </body>
-    </html>
-  `);
+// Serve frontend
+app.get("/", (_, res) => {
+  res.sendFile(new URL("./index.html", import.meta.url).pathname);
 });
 
-startWASocket();
-app.listen(process.env.PORT || 3000, () => console.log("Server Running 🚀"));
+// API to return QR to frontend
+app.get("/qr", (_, res) => {
+  res.json({ qr: qrData });
+});
+
+// API to return session ID to website
+app.get("/session", (_, res) => {
+  res.json({ sessionId });
+});
+
+app.listen(process.env.PORT || 10000, () => {
+  console.log("🚀 Server Running");
+  startSocket();
+});
+                     
