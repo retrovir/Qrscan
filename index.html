@@ -28,19 +28,6 @@
     width:80%;
     margin:15px auto;
   }
-  .btn{
-    background:#222;
-    color:white;
-    padding:10px 18px;
-    border:none;
-    border-radius:6px;
-    margin-top:10px;
-    cursor:pointer;
-  }
-  .btn:disabled{
-    background:#555;
-    cursor:not-allowed;
-  }
 </style>
 </head>
 <body>
@@ -51,15 +38,10 @@
 
 <div id="sessionBox">Waiting for pairing...</div>
 
-<button class="btn" id="downloadCreds" disabled>Download creds.json</button>
-<button class="btn" id="downloadAuthZip" disabled>Download Full Auth Folder (.zip)</button>
-
 <script>
   const qrImg = document.getElementById("qr");
   const status = document.getElementById("status");
   const sessionBox = document.getElementById("sessionBox");
-  const downloadCreds = document.getElementById("downloadCreds");
-  const downloadAuthZip = document.getElementById("downloadAuthZip");
 
   async function loadQR(){
     try{
@@ -67,7 +49,7 @@
       const d = await r.json();
       if(d.qr){
         qrImg.src = d.qr;
-        status.innerText = "Scan this QR in Linked Devices";
+        status.innerText = "📷 Scan this QR in WhatsApp Linked Devices";
       }
     }catch{
       status.innerText = "QR Error";
@@ -80,22 +62,11 @@
       const d = await r.json();
       if(d.connected){
         sessionBox.innerText = `✅ Paired!\nSession ID: ${d.sessionId}`;
-
-        downloadCreds.disabled = false;
-        downloadAuthZip.disabled = false;
         qrImg.style.border = "3px solid green";
         status.innerText = "✅ Device connected";
       }
     }catch{}
   }
-
-  downloadCreds.addEventListener("click", () => {
-    window.location = "/download/creds";
-  });
-
-  downloadAuthZip.addEventListener("click", () => {
-    window.location = "/download/auth-zip";
-  });
 
   loadQR();
   setInterval(loadQR, 25000);
