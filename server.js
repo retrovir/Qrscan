@@ -1,7 +1,10 @@
 import express from "express";
-import makeWASocket, { useMultiFileAuthState, DisconnectReason, jidDecode } from "@whiskeysockets/baileys";
+import makeWASocket, { useMultiFileAuthState, DisconnectReason } from "@whiskeysockets/baileys";
 import qrcode from "qrcode";
 import dotenv from "dotenv";
+import fs from "fs";
+import path from "path";
+import archiver from "archiver";
 
 dotenv.config();
 
@@ -18,22 +21,26 @@ async function startSocket() {
     const { state, saveCreds } = await useMultiFileAuthState("auth");
     const sock = makeWASocket({ auth: state, printQRInTerminal: false });
 
-    sock.ev.on("creds.update", saveCreds);
+    sock.ev.on("creds.update", async () => {
+      await saveCreds();
+      if (connected && !restarting) {
+        console.log("💾 Credentials Updated");
+      }
+    });
 
-    // QR generator
     sock.ev.on("connection.update", async (update) => {
       const { connection, lastDisconnect, qr } = update;
 
       if (qr) {
         qrData = await qrcode.toDataURL(qr);
-        console.log("🔄 NEW QR GENERATED");
+        console.log("🔄 New QR Generated");
       }
 
       if (connection === "open") {
         connected = true;
         restarting = false;
-        sessionId = `session-${Date.now()}`;  // ✅ show on website
-        console.log("✅ PAIRED SUCCESSFULLY");
+        sessionId = `session-${Date.now()}`;
+        console.log("✅ Paired Successfully!");
       }
 
       if (connection === "close" && !restarting) {
@@ -43,54 +50,66 @@ async function startSocket() {
         if (shouldRestart) {
           restarting = true;
           connected = false;
-          console.log("⚠ Restarting socket in 5 sec...");
-          setTimeout(() => startSocket(), 5000);
+          console.log("⚠ Restarting socket...");
+          setTimeout(() => startSocket(), 4000);
         }
       }
     });
 
-    // Listen for WhatsApp commands
     sock.ev.on("messages.upsert", async ({ messages }) => {
       const m = messages[0];
-      if (!connected || !sessionId) return; // ✅ prevent premature send
-
+      if (!connected || !sessionId) return;
       const jid = m.key.remoteJid;
-      if (!jid) return;
+      if (!jid || m.key.fromMe) return;
 
-      const msg = m.message?.conversation?.toLowerCase() || "";
+      const text = m.message?.conversation
+                || m.message?.extendedTextMessage?.text
+                || "";
+      const msg = text.toLowerCase().trim();
 
-      if (!m.key.fromMe && msg === "get session") {
-        const decoded = jidDecode(jid);
-        const user = decoded?.user || "unknown";
-        const server = decoded?.server || "unknown";
-
-        await sock.sendMessage(jid, { text: `✅ Session ID: ${sessionId}\nJID: ${user}@${server}` });
+      if (msg === "get session") {
+        await sock.sendMessage(jid, { text: `✅ Active Session ID: ${sessionId}` });
       }
     });
 
   } catch (err) {
-    console.log("❌ SOCKET ERROR:", err.message);
-    setTimeout(() => startSocket(), 5000);
+    console.log("❌ Socket Error:", err.message);
+    setTimeout(() => startSocket(), 4000);
   }
 }
 
-// Serve frontend
 app.get("/", (_, res) => {
-  res.sendFile(new URL("./index.html", import.meta.url).pathname);
+  res.sendFile(path.join(process.cwd(), "index.html"));
 });
 
-// API to return QR to frontend
-app.get("/qr", (_, res) => {
-  res.json({ qr: qrData });
+app.get("/qr", (_, res) => res.json({ qr: qrData }));
+
+app.get("/session", (_, res) => res.json({ sessionId, connected }));
+
+app.get("/download/creds", (_, res) => {
+  const credsPath = path.join(process.cwd(), "auth", "creds.json");
+  if (fs.existsSync(credsPath)) {
+    res.download(credsPath);
+  } else {
+    res.status(404).json({ error: "creds.json not found" });
+  }
 });
 
-// API to return session ID to website
-app.get("/session", (_, res) => {
-  res.json({ sessionId });
+app.get("/download/auth-zip", (_, res) => {
+  const authDir = path.join(process.cwd(), "auth");
+  const zipFile = path.join(process.cwd(), "auth.zip");
+
+  const output = fs.createWriteStream(zipFile);
+  const archive = archiver("zip", { zlib: { level: 9 } });
+
+  output.on("close", () => res.download(zipFile));
+
+  archive.pipe(output);
+  archive.directory(authDir, false);
+  archive.finalize();
 });
 
 app.listen(process.env.PORT || 10000, () => {
-  console.log("🚀 Server Running");
+  console.log("🚀 Server running...");
   startSocket();
 });
-                     
