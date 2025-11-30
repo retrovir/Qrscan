@@ -1,84 +1,105 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>WhatsApp QR Scanner</title>
-  <style>
-    body {
-      font-family: Arial, sans-serif;
-      text-align: center;
-      background: #f4f4f4;
-      padding-top: 40px;
-    }
-    #qr {
-      margin-top: 20px;
-      width: 260px;
-      height: 260px;
-      border: 3px dashed #075e54;
-      padding: 10px;
-      background: white;
-    }
-    #status {
-      margin-top: 15px;
-      font-size: 18px;
-    }
-    #session {
-      margin-top: 15px;
-      font-size: 16px;
-      background: #075e54;
-      color: white;
-      padding: 10px;
-      border-radius: 6px;
-      display: inline-block;
-      word-break: break-all;
-      max-width: 80%;
-    }
-  </style>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>WhatsApp Pairing Portal</title>
+<style>
+  body{
+    font-family:poppins, sans-serif;
+    background:#e9ecef;
+    text-align:center;
+    padding-top:30px;
+  }
+  #qr{
+    width:260px;
+    height:260px;
+    background:white;
+    padding:10px;
+    border:3px dashed #075e54;
+    border-radius:10px;
+    margin-top:15px;
+  }
+  #sessionBox{
+    background:#075e54;
+    color:white;
+    padding:12px;
+    border-radius:6px;
+    width:80%;
+    margin:15px auto;
+  }
+  .btn{
+    background:#222;
+    color:white;
+    padding:10px 18px;
+    border:none;
+    border-radius:6px;
+    margin-top:10px;
+    cursor:pointer;
+  }
+  .btn:disabled{
+    background:#555;
+    cursor:not-allowed;
+  }
+</style>
 </head>
 <body>
 
-  <h2>Scan WhatsApp QR</h2>
-  <img id="qr" src="" alt="QR Code will load here..."/>
-  <p id="status">🔄 Generating QR...</p>
-  <h3>Session ID:</h3>
-  <div id="session">Waiting for pairing...</div>
+<h2>📷 Scan WhatsApp QR</h2>
+<img id="qr" src="" alt="QR loading..."/>
+<p id="status">Generating QR...</p>
+
+<div id="sessionBox">Waiting for pairing...</div>
+
+<button class="btn" id="downloadCreds" disabled>Download creds.json</button>
+<button class="btn" id="downloadAuthZip" disabled>Download Full Auth Folder (.zip)</button>
 
 <script>
   const qrImg = document.getElementById("qr");
   const status = document.getElementById("status");
-  const session = document.getElementById("session");
+  const sessionBox = document.getElementById("sessionBox");
+  const downloadCreds = document.getElementById("downloadCreds");
+  const downloadAuthZip = document.getElementById("downloadAuthZip");
 
-  async function loadQR() {
-    try {
-      const res = await fetch("/qr");
-      const data = await res.json();
-
-      if (data.qr) {
-        qrImg.src = data.qr;
-        status.innerText = "📷 Scan this QR in WhatsApp Linked Devices";
+  async function loadQR(){
+    try{
+      const r = await fetch("/qr");
+      const d = await r.json();
+      if(d.qr){
+        qrImg.src = d.qr;
+        status.innerText = "Scan this QR in Linked Devices";
       }
-    } catch (err) {
-      status.innerText = "❌ Error loading QR";
+    }catch{
+      status.innerText = "QR Error";
     }
   }
 
-  async function checkSession() {
-    try {
-      const res = await fetch("/session");
-      const data = await res.json();
+  async function checkSession(){
+    try{
+      const r = await fetch("/session");
+      const d = await r.json();
+      if(d.connected){
+        sessionBox.innerText = `✅ Paired!\nSession ID: ${d.sessionId}`;
 
-      if (data.sessionId) {
-        session.innerText = data.sessionId;
-        status.innerText = "✅ Paired successfully!";
+        downloadCreds.disabled = false;
+        downloadAuthZip.disabled = false;
         qrImg.style.border = "3px solid green";
+        status.innerText = "✅ Device connected";
       }
-    } catch (_) {}
+    }catch{}
   }
 
+  downloadCreds.addEventListener("click", () => {
+    window.location = "/download/creds";
+  });
+
+  downloadAuthZip.addEventListener("click", () => {
+    window.location = "/download/auth-zip";
+  });
+
   loadQR();
-  setInterval(loadQR, 30000);         // refresh QR
-  setInterval(checkSession, 2000);    // check pairing
+  setInterval(loadQR, 25000);
+  setInterval(checkSession, 2000);
 </script>
 
 </body>
