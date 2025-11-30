@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WhatsApp QR Scanner</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      text-align: center;
+      background: #f4f4f4;
+      padding-top: 40px;
+    }
+    #qr {
+      margin-top: 20px;
+      width: 260px;
+      height: 260px;
+      border: 3px dashed #075e54;
+      padding: 10px;
+      background: white;
+    }
+    #status {
+      margin-top: 15px;
+      font-size: 18px;
+    }
+    #session {
+      margin-top: 15px;
+      font-size: 16px;
+      background: #075e54;
+      color: white;
+      padding: 10px;
+      border-radius: 6px;
+      display: inline-block;
+      word-break: break-all;
+      max-width: 80%;
+    }
+  </style>
+</head>
+<body>
+
+  <h2>Scan WhatsApp QR</h2>
+  <img id="qr" src="" alt="QR Code will load here..."/>
+  <p id="status">🔄 Generating QR...</p>
+  <h3>Session ID:</h3>
+  <div id="session">Waiting for pairing...</div>
+
+<script>
+  const qrImg = document.getElementById("qr");
+  const status = document.getElementById("status");
+  const session = document.getElementById("session");
+
+  async function loadQR() {
+    try {
+      const res = await fetch("/qr");
+      const data = await res.json();
+
+      if (data.qr) {
+        qrImg.src = data.qr;
+        status.innerText = "📷 Scan this QR in WhatsApp Linked Devices";
+      }
+    } catch (err) {
+      status.innerText = "❌ Error loading QR";
+    }
+  }
+
+  async function checkSession() {
+    try {
+      const res = await fetch("/session");
+      const data = await res.json();
+
+      if (data.sessionId) {
+        session.innerText = data.sessionId;
+        status.innerText = "✅ Paired successfully!";
+        qrImg.style.border = "3px solid green";
+      }
+    } catch (_) {}
+  }
+
+  loadQR();
+  setInterval(loadQR, 30000);         // refresh QR
+  setInterval(checkSession, 2000);    // check pairing
+</script>
+
+</body>
+</html>
