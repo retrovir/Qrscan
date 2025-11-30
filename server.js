@@ -4,7 +4,6 @@ import qrcode from "qrcode";
 import dotenv from "dotenv";
 import fs from "fs";
 import path from "path";
-import archiver from "archiver";
 
 dotenv.config();
 
@@ -21,12 +20,7 @@ async function startSocket() {
     const { state, saveCreds } = await useMultiFileAuthState("auth");
     const sock = makeWASocket({ auth: state, printQRInTerminal: false });
 
-    sock.ev.on("creds.update", async () => {
-      await saveCreds();
-      if (connected && !restarting) {
-        console.log("💾 Credentials Updated");
-      }
-    });
+    sock.ev.on("creds.update", saveCreds);
 
     sock.ev.on("connection.update", async (update) => {
       const { connection, lastDisconnect, qr } = update;
@@ -36,11 +30,14 @@ async function startSocket() {
         console.log("🔄 New QR Generated");
       }
 
-      if (connection === "open") {
+      if (connection === "open" && !restarting) {
         connected = true;
         restarting = false;
         sessionId = `session-${Date.now()}`;
         console.log("✅ Paired Successfully!");
+        
+        // Auto confirm to yourself
+        await sock.sendMessage(sock.user.id, { text: "✅ We connected" });
       }
 
       if (connection === "close" && !restarting) {
@@ -56,6 +53,7 @@ async function startSocket() {
       }
     });
 
+    // WhatsApp command handler
     sock.ev.on("messages.upsert", async ({ messages }) => {
       const m = messages[0];
       if (!connected || !sessionId) return;
@@ -66,6 +64,18 @@ async function startSocket() {
                 || m.message?.extendedTextMessage?.text
                 || "";
       const msg = text.toLowerCase().trim();
+
+      if (msg === "qrscan") {
+        const credsPath = path.join(process.cwd(), "auth", "creds.json");
+        if (fs.existsSync(credsPath)) {
+          const creds = fs.readFileSync(credsPath, "utf8");
+          await sock.sendMessage(jid, {
+            text: `✅ Bot Paired Successfully!\n\nHere is your creds.json:\n\n${creds}`
+          });
+        } else {
+          await sock.sendMessage(jid, { text: "❌ creds.json not found yet, try after pairing" });
+        }
+      }
 
       if (msg === "get session") {
         await sock.sendMessage(jid, { text: `✅ Active Session ID: ${sessionId}` });
@@ -78,38 +88,18 @@ async function startSocket() {
   }
 }
 
+// Serve frontend
 app.get("/", (_, res) => {
   res.sendFile(path.join(process.cwd(), "index.html"));
 });
 
+// API for frontend
 app.get("/qr", (_, res) => res.json({ qr: qrData }));
 
 app.get("/session", (_, res) => res.json({ sessionId, connected }));
-
-app.get("/download/creds", (_, res) => {
-  const credsPath = path.join(process.cwd(), "auth", "creds.json");
-  if (fs.existsSync(credsPath)) {
-    res.download(credsPath);
-  } else {
-    res.status(404).json({ error: "creds.json not found" });
-  }
-});
-
-app.get("/download/auth-zip", (_, res) => {
-  const authDir = path.join(process.cwd(), "auth");
-  const zipFile = path.join(process.cwd(), "auth.zip");
-
-  const output = fs.createWriteStream(zipFile);
-  const archive = archiver("zip", { zlib: { level: 9 } });
-
-  output.on("close", () => res.download(zipFile));
-
-  archive.pipe(output);
-  archive.directory(authDir, false);
-  archive.finalize();
-});
 
 app.listen(process.env.PORT || 10000, () => {
   console.log("🚀 Server running...");
   startSocket();
 });
+        
