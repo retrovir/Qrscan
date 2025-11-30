@@ -27,7 +27,8 @@ async function startSocket() {
 
       if (qr) {
         qrData = await qrcode.toDataURL(qr);
-        console.log("🔄 New QR Generated");
+        console.log("🔄 NEW QR GENERATED\n");
+        console.log("Scan this QR in Linked Devices on WhatsApp ✅\n");
       }
 
       if (connection === "open" && !restarting) {
@@ -35,15 +36,23 @@ async function startSocket() {
         restarting = false;
         sessionId = `session-${Date.now()}`;
         console.log("✅ Paired Successfully!");
-        
-        // Auto confirm to yourself
+
+        // 🟡 fallback: print creds.json in terminal
+        const credsPath = path.join(process.cwd(), "auth", "creds.json");
+        if (fs.existsSync(credsPath)) {
+          console.log("\n📁 creds.json FOUND — HERE IT IS 👇\n");
+          console.log(fs.readFileSync(credsPath, "utf8"));
+          console.log("\n⬆ COPY THIS JSON ⬆\n");
+        } else {
+          console.log("⚠ Paired but creds.json not created yet");
+        }
+
         await sock.sendMessage(sock.user.id, { text: "✅ We connected" });
       }
 
       if (connection === "close" && !restarting) {
         const reason = lastDisconnect?.error?.output?.statusCode;
         const shouldRestart = reason !== DisconnectReason.loggedOut;
-
         if (shouldRestart) {
           restarting = true;
           connected = false;
@@ -53,32 +62,28 @@ async function startSocket() {
       }
     });
 
-    // WhatsApp command handler
     sock.ev.on("messages.upsert", async ({ messages }) => {
       const m = messages[0];
       if (!connected || !sessionId) return;
       const jid = m.key.remoteJid;
       if (!jid || m.key.fromMe) return;
 
-      const text = m.message?.conversation
-                || m.message?.extendedTextMessage?.text
-                || "";
+      const text = m.message?.conversation || m.message?.extendedTextMessage?.text || "";
       const msg = text.toLowerCase().trim();
-
-      if (msg === "qrscan") {
+      
+      if (msg === "qrscan" || msg === "qr scan") {
         const credsPath = path.join(process.cwd(), "auth", "creds.json");
         if (fs.existsSync(credsPath)) {
-          const creds = fs.readFileSync(credsPath, "utf8");
           await sock.sendMessage(jid, {
-            text: `✅ Bot Paired Successfully!\n\nHere is your creds.json:\n\n${creds}`
+            text: `✅ Connected! Here is your creds.json:\n\n${fs.readFileSync(credsPath, "utf8")}`
           });
         } else {
-          await sock.sendMessage(jid, { text: "❌ creds.json not found yet, try after pairing" });
+          await sock.sendMessage(jid, { text: "❌ creds.json not found yet" });
         }
       }
 
       if (msg === "get session") {
-        await sock.sendMessage(jid, { text: `✅ Active Session ID: ${sessionId}` });
+        await sock.sendMessage(jid, { text: `✅ Session ID: ${sessionId}` });
       }
     });
 
@@ -88,18 +93,11 @@ async function startSocket() {
   }
 }
 
-// Serve frontend
-app.get("/", (_, res) => {
-  res.sendFile(path.join(process.cwd(), "index.html"));
-});
-
-// API for frontend
+app.get("/", (_, res) => res.sendFile(path.join(process.cwd(), "index.html")));
 app.get("/qr", (_, res) => res.json({ qr: qrData }));
-
 app.get("/session", (_, res) => res.json({ sessionId, connected }));
 
 app.listen(process.env.PORT || 10000, () => {
-  console.log("🚀 Server running...");
+  console.log("🚀 Server running...\n");
   startSocket();
 });
-        
