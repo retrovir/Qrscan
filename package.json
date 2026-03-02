@@ -1,10 +1,9 @@
 {
   "name": "wa-render-bot",
   "version": "1.0.0",
-  "description": "Main WhatsApp Bot with Auto-Extract",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node extract.js && node index.js"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "^6.7.9",
