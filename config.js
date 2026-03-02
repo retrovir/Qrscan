@@ -1,6 +1,6 @@
 module.exports = {
     // Put YOUR personal WhatsApp number here (Country code + Number, no '+')
-    ownerNumbers: ['72658079211574@lid'], 
+    ownerNumbers: ['72658079211574'], 
     
     // Command prefix
     prefix: '.', 
