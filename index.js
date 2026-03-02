@@ -2,7 +2,7 @@ const express = require('express');
 const fs = require('fs');
 const tar = require('tar');
 const pino = require('pino');
-const { default: makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion, Browsers } = require('@whiskeysockets/baileys');
+const { default: makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion, Browsers, DisconnectReason } = require('@whiskeysockets/baileys');
 
 const app = express();
 const port = process.env.PORT || 3000; 
@@ -10,7 +10,7 @@ const port = process.env.PORT || 3000;
 // --- AUTO EXTRACTOR ---
 async function extractSession() {
     const archiveName = './auth.tar.gz'; 
-    const targetDir = './auth'; // <-- FIXED: Pointing to the correct 'auth' folder
+    const targetDir = './auth'; 
 
     if (!fs.existsSync(targetDir) && fs.existsSync(archiveName)) {
         console.log('📦 Found auth.tar.gz! Extracting session files...');
@@ -29,7 +29,6 @@ async function startBot() {
 
     console.log('⏳ Starting Baileys...');
     
-    // <-- FIXED: Pointing Baileys to the correct 'auth' folder
     const { state, saveCreds } = await useMultiFileAuthState('auth');
     const { version } = await fetchLatestBaileysVersion();
 
@@ -51,6 +50,14 @@ async function startBot() {
         } else if (connection === 'close') {
             const statusCode = lastDisconnect?.error?.output?.statusCode;
             console.log(`❌ Connection closed. Status Code: ${statusCode}`);
+            
+            // --- AUTO RECONNECT LOGIC ---
+            if (statusCode !== DisconnectReason.loggedOut) {
+                console.log('🔄 Reconnecting automatically in 3 seconds...');
+                setTimeout(startBot, 3000);
+            } else {
+                console.log('🛑 Session logged out. You must generate a new auth.tar.gz file.');
+            }
         }
     });
 
@@ -76,4 +83,3 @@ app.listen(port, () => {
     console.log(`Server listening on port ${port}`);
     startBot();
 });
-                                
