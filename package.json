@@ -1,15 +1,19 @@
 {
-  "name": "wa-session-qr",
+  "name": "wa-auth-telegram",
   "version": "1.0.0",
-  "type": "module",
+  "description": "WhatsApp authentication server that sends session zip to Telegram",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
   "dependencies": {
-    "@whiskeysockets/baileys": "latest",
-    "express": "latest",
-    "dotenv": "latest",
-    "qrcode": "latest"
+    "@whiskeysockets/baileys": "^6.7.9",
+    "archiver": "^7.0.1",
+    "express": "^4.21.0",
+    "node-telegram-bot-api": "^0.66.0",
+    "pino": "^9.4.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   }
 }
