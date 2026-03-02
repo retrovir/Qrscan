@@ -6,7 +6,7 @@ module.exports = {
     prefix: '.', 
     
     // Default mode ('public' or 'private')
-    mode: 'private', 
+    mode: 'public', 
     
     // Your Render URL to keep the bot awake
     renderUrl: 'https://whatsapp-wct4.onrender.com',
