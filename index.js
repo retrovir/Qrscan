@@ -78,13 +78,17 @@ async function startBot() {
 
         const text = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
         const remoteJid = msg.key.remoteJid;
-        const senderNumber = (msg.key.participant || remoteJid).split('@')[0];
+        
+        // --- MULTI-DEVICE FIX: Strips away the hidden :15 device IDs! ---
+        const rawSender = msg.key.participant || remoteJid;
+        const senderNumber = rawSender.split('@')[0].split(':')[0]; 
 
         const isOwner = config.ownerNumbers.includes(senderNumber);
 
         // Check Mode from DATABASE
         if (db.mode === 'private' && !isOwner) return; 
 
+        // Check if message starts with your prefix
         if (!text.startsWith(config.prefix)) return;
 
         const args = text.slice(config.prefix.length).trim().split(/ +/);
