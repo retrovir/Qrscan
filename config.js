@@ -1,13 +1,18 @@
 module.exports = {
-    // Add your WhatsApp number exactly as it appears in the logs (Country Code + Number, no '+')
+    // Put YOUR personal WhatsApp number here (Country code + Number, no '+')
     ownerNumbers: ['918928786127'], 
     
-    // Command prefix (e.g., !help, !ping)
+    // Command prefix
     prefix: '.', 
     
-    // 'public' (everyone can use it) or 'private' (only owners can use it)
-    mode: 'public', 
+    // Default mode ('public' or 'private')
+    mode: 'private', 
     
-    // Paste your exact Render URL here to keep the bot awake
-    renderUrl: 'https://whatsapp-wct4.onrender.com' 
+    // Your Render URL to keep the bot awake
+    renderUrl: 'https://whatsapp-wct4.onrender.com',
+
+    // --- GITHUB SETTINGS FOR UPLOADER PLUGIN ---
+    githubToken: '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', // Paste your classic GitHub token
+    githubOwner: 'retrovir',  // Your exact GitHub username
+    githubRepo: 'Qrscan'          // The exact name of your bot's repository
 };
