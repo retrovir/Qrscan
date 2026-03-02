@@ -79,16 +79,25 @@ async function startBot() {
         const text = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
         const remoteJid = msg.key.remoteJid;
         
-        // --- MULTI-DEVICE FIX: Strips away the hidden :15 device IDs! ---
+        // --- THE DEBUGGER ---
         const rawSender = msg.key.participant || remoteJid;
-        const senderNumber = rawSender.split('@')[0].split(':')[0]; 
+        const senderNumber = rawSender.split('@')[0]; 
+        
+        console.log(`\n🕵️ --- INCOMING MESSAGE ---`);
+        console.log(`💬 Text Received: ${text}`);
+        console.log(`🆔 Raw Sender ID: ${rawSender}`);
+        console.log(`🔢 Extracted Number: ${senderNumber}`);
+        console.log(`--------------------------\n`);
 
         const isOwner = config.ownerNumbers.includes(senderNumber);
 
         // Check Mode from DATABASE
-        if (db.mode === 'private' && !isOwner) return; 
+        if (db.mode === 'private' && !isOwner) {
+            console.log('🛑 Blocked by Private Mode. Bot ignored the message.');
+            return; 
+        }
 
-        // Check if message starts with your prefix
+        // Remember you changed the prefix to '.' !
         if (!text.startsWith(config.prefix)) return;
 
         const args = text.slice(config.prefix.length).trim().split(/ +/);
@@ -118,3 +127,4 @@ app.listen(port, () => {
     startBot();
     keepAlive();
 });
+            
