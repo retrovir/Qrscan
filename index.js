@@ -62,11 +62,16 @@ async function startBot() {
             console.log('✅ SUCCESS! Bot is online and ready.');
         } else if (connection === 'close') {
             const statusCode = lastDisconnect?.error?.output?.statusCode;
+            
+            // WE NEED TO SEE THIS CODE:
+            console.log(`❌ Connection closed. Status Code: ${statusCode}`);
+            console.log('🛑 Full Error:', lastDisconnect?.error?.message);
+
             if (statusCode !== DisconnectReason.loggedOut) {
-                console.log('🔄 Reconnecting in 3 seconds...');
-                setTimeout(startBot, 3000);
+                console.log('🔄 Telling Render to perform a clean reboot...');
+                process.exit(1); // Safely kills the server so Render can cleanly restart it
             } else {
-                console.log('🛑 Logged out. You need a new auth.tar.gz.');
+                console.log('🛑 Logged out. You need to generate a new auth.tar.gz file.');
             }
         }
     });
@@ -91,13 +96,11 @@ async function startBot() {
 
         const isOwner = config.ownerNumbers.includes(senderNumber);
 
-        // Check Mode from DATABASE
         if (db.mode === 'private' && !isOwner) {
             console.log('🛑 Blocked by Private Mode. Bot ignored the message.');
             return; 
         }
 
-        // Remember you changed the prefix to '.' !
         if (!text.startsWith(config.prefix)) return;
 
         const args = text.slice(config.prefix.length).trim().split(/ +/);
@@ -115,7 +118,6 @@ async function startBot() {
     });
 }
 
-// --- RENDER ANTI-SLEEP ---
 function keepAlive() {
     if (config.renderUrl) {
         setInterval(() => fetch(config.renderUrl).catch(() => {}), 10 * 60 * 1000); 
@@ -127,4 +129,4 @@ app.listen(port, () => {
     startBot();
     keepAlive();
 });
-            
+        
