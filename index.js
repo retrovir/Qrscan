@@ -1,177 +1,198 @@
-const express = require('express');
-const fs = require('fs');
-const path = require('path');
-const pino = require('pino');
-const { 
-    default: makeWASocket, 
-    useMultiFileAuthState, 
-    fetchLatestBaileysVersion, 
-    Browsers, 
-    DisconnectReason,
-    getContentType,
-    isJidBroadcast
-} = require('@whiskeysockets/baileys');
+import makeWASocket, {
+  useMultiFileAuthState,
+  DisconnectReason,
+  fetchLatestBaileysVersion,
+  Browsers,
+  getContentType,
+  isJidBroadcast
+} from "@whiskeysockets/baileys";
 
-const config = require('./config');
+import pino from "pino";
+import fs from "fs";
+import path from "path";
+import express from "express";
+import { fileURLToPath } from "url";
+
+/* ================= FIX __dirname ================= */
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+/* ================= CONFIG ================= */
+
+const PORT = process.env.PORT || 9090;
+const PLUGIN_DIR = path.join(__dirname, "plugins");
+
+// Add your owner numbers here (replace with your actual number)
+const ownerNumbers = ['1234567890']; 
+const prefix = '.'; 
+
+/* ================= SERVER ================= */
 
 const app = express();
-const port = process.env.PORT || 3000; 
+app.get("/", (_, res) => res.send("WhatsApp Bot Running"));
+app.listen(PORT, () => console.log(`🌐 Server on ${PORT}`));
 
-// --- DATABASE SETUP ---
-const dbPath = path.join(__dirname, 'database.json');
-let db = { mode: config.mode, autoReactGroups: [] }; 
-if (fs.existsSync(dbPath)) {
-    try { db = JSON.parse(fs.readFileSync(dbPath)); } catch (e) { console.log("DB Reset"); }
-}
-const saveDB = () => fs.writeFileSync(dbPath, JSON.stringify(db, null, 2));
+/* ================= PLUGINS ================= */
 
-// --- PLUGIN LOADER ---
 const plugins = new Map();
-function loadPlugins() {
-    const pluginsPath = path.join(__dirname, 'plugins');
-    if (!fs.existsSync(pluginsPath)) fs.mkdirSync(pluginsPath);
-    const files = fs.readdirSync(pluginsPath).filter(file => file.endsWith('.js'));
-    for (const file of files) {
-        try {
-            const pluginPath = path.join(pluginsPath, file);
-            delete require.cache[require.resolve(pluginPath)]; 
-            const plugin = require(pluginPath);
-            if (plugin.name && plugin.execute) plugins.set(plugin.name, plugin);
-        } catch (e) { console.error(`Plugin Load Error ${file}:`, e); }
+
+async function loadPlugins() {
+  plugins.clear();
+
+  if (!fs.existsSync(PLUGIN_DIR)) {
+    fs.mkdirSync(PLUGIN_DIR);
+    console.log("📁 plugins folder created");
+  }
+
+  const files = fs.readdirSync(PLUGIN_DIR).filter(f => f.endsWith(".js"));
+
+  for (const file of files) {
+    try {
+      const pluginPath = path.join(PLUGIN_DIR, file);
+
+      const mod = await import(pluginPath + `?v=${Date.now()}`);
+      const plugin = mod.default || mod; // Fallback in case they export differently
+
+      if (plugin.name && plugin.execute) {
+          plugins.set(plugin.name, plugin);
+          console.log(`🔌 Loaded plugin: ${file} [${plugin.name}]`);
+      } else {
+          console.log(`⚠️ Skipped ${file} (missing name or execute)`);
+      }
+
+    } catch (e) {
+      console.log(`❌ Failed to load ${file}:`, e.message);
     }
-    console.log(`🔌 Online with ${plugins.size} plugins.`);
+  }
 }
 
-// --- MAIN BOT ENGINE ---
+/* ================= BOT ================= */
+
 async function startBot() {
-    loadPlugins();
-    const { state, saveCreds } = await useMultiFileAuthState('auth');
-    const { version } = await fetchLatestBaileysVersion();
+  await loadPlugins();
+  console.log("🚀 Starting WhatsApp bot...");
 
-    const sock = makeWASocket({
-        version,
-        logger: pino({ level: 'silent' }),
-        printQRInTerminal: false,
-        auth: state,
-        browser: Browsers.macOS('Desktop'),
-        // --- CRITICAL SESSION FIXES ---
-        syncFullHistory: false,
-        markOnlineOnConnect: true,
-        shouldIgnoreJid: jid => isJidBroadcast(jid),
-        getMessage: async (key) => {
-            return { conversation: 'ping' }; // Fallback to prevent SessionError crashes
-        },
-        patchMessageBeforeSending: (message) => {
-            const requiresPatch = !!(
-                message.buttonsMessage ||
-                message.templateMessage ||
-                message.listMessage
-            );
-            if (requiresPatch) {
-                return {
-                    viewOnceMessage: {
-                        message: {
-                            messageContextInfo: {
-                                deviceListMetadata: {},
-                                deviceListMetadataVersion: 2
-                            },
-                            ...message
-                        }
+  const { state, saveCreds } = await useMultiFileAuthState("auth");
+  const { version } = await fetchLatestBaileysVersion();
+
+  const sock = makeWASocket({
+    logger: pino({ level: "silent" }),
+    auth: state,
+    browser: Browsers.macOS("Desktop"),
+    printQRInTerminal: false,
+    version,
+    // --- STABILITY FIXES ---
+    markOnlineOnConnect: true,
+    shouldIgnoreJid: jid => isJidBroadcast(jid),
+    getMessage: async (key) => {
+        return { conversation: 'ping' }; 
+    },
+    patchMessageBeforeSending: (message) => {
+        const requiresPatch = !!(
+            message.buttonsMessage ||
+            message.templateMessage ||
+            message.listMessage
+        );
+        if (requiresPatch) {
+            return {
+                viewOnceMessage: {
+                    message: {
+                        messageContextInfo: {
+                            deviceListMetadata: {},
+                            deviceListMetadataVersion: 2
+                        },
+                        ...message
                     }
-                };
-            }
-            return message;
-        }
-    });
-
-    sock.ev.on('creds.update', saveCreds);
-
-    sock.ev.on('connection.update', async (update) => {
-        const { connection, lastDisconnect } = update;
-        if (connection === 'open') {
-            console.log('✅ BOT IS LIVE AND CONNECTED');
-            // Force Sync Groups to establish initial sessions
-            try {
-                const groups = await sock.groupFetchAllParticipating();
-                console.log(`👥 Synced with ${Object.keys(groups).length} groups.`);
-            } catch (e) { console.log("Group Sync Error:", e.message); }
-        } 
-        else if (connection === 'close') {
-            const shouldRestart = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
-            if (shouldRestart) {
-                console.log('🔄 Session Conflict/Error. Rebooting...');
-                process.exit(1); 
-            }
-        }
-    });
-
-    sock.ev.on('messages.upsert', async (m) => {
-        const msg = m.messages[0];
-        if (!msg.message || msg.key.fromMe) return;
-
-        // --- OMNI-TEXT EXTRACTOR (Upgraded for Disappearing Messages) ---
-        let msgContent = msg.message;
-        if (msgContent.ephemeralMessage) msgContent = msgContent.ephemeralMessage.message;
-        if (msgContent.viewOnceMessage) msgContent = msgContent.viewOnceMessage.message;
-        if (msgContent.viewOnceMessageV2) msgContent = msgContent.viewOnceMessageV2.message;
-        if (msgContent.documentWithCaptionMessage) msgContent = msgContent.documentWithCaptionMessage.message;
-
-        const type = getContentType(msgContent);
-        const body = (type === 'conversation') ? msgContent.conversation : 
-                     (type === 'extendedTextMessage') ? msgContent.extendedTextMessage?.text : 
-                     (type === 'imageMessage') ? msgContent.imageMessage?.caption : 
-                     (type === 'videoMessage') ? msgContent.videoMessage?.caption : '';
-
-        const remoteJid = msg.key.remoteJid;
-        const isGroup = remoteJid.endsWith('@g.us');
-        
-        // Identify Sender (Multi-Device & Group Aware)
-        const rawSender = isGroup ? msg.key.participant : remoteJid;
-        const senderNumber = rawSender ? rawSender.split('@')[0].split(':')[0] : ''; 
-        const isOwner = config.ownerNumbers.includes(senderNumber);
-
-        // --- 1. AUTO-REACT (Global Listener) ---
-        if (plugins.has('autoreact')) {
-            try { await plugins.get('autoreact').execute(sock, msg, [], { isOwner, db, saveDB, plugins }); } catch (e) {}
-        }
-
-        // --- 2. COMMAND PROCESSING WITH AUTO-HEAL ---
-        if (db.mode === 'private' && !isOwner) return; 
-        if (!body.startsWith(config.prefix)) return;
-
-        const args = body.slice(config.prefix.length).trim().split(/ +/);
-        const commandName = args.shift().toLowerCase();
-
-        if (plugins.has(commandName)) {
-            try {
-                console.log(`⚙️ [${commandName}] | From: ${senderNumber} | Group: ${isGroup}`);
-                await plugins.get(commandName).execute(sock, msg, args, { isOwner, db, saveDB, plugins });
-            } catch (error) { 
-                // 🔧 THE AUTO-HEAL ENGINE
-                if (String(error).includes('No sessions') && isGroup) {
-                    console.log(`🔧 [AUTO-HEAL] Missing session keys! Running invisible background sync...`);
-                    try {
-                        const metadata = await sock.groupMetadata(remoteJid);
-                        for (let p of metadata.participants) {
-                            await sock.presenceSubscribe(p.id); 
-                        }
-                        console.log(`✅ [AUTO-HEAL] Keys synced! Retrying command...`);
-                        await plugins.get(commandName).execute(sock, msg, args, { isOwner, db, saveDB, plugins });
-                    } catch (retryError) {
-                        console.error(`❌ Auto-Heal failed:`, retryError);
-                    }
-                } else {
-                    console.error(`❌ Error in ${commandName}:`, error);   
                 }
+            };
+        }
+        return message;
+    }
+  });
+
+  sock.ev.on("creds.update", saveCreds);
+
+  sock.ev.on("connection.update", async ({ connection, lastDisconnect }) => {
+    if (connection === "open") {
+      console.log("✅ WhatsApp Connected");
+      try {
+          const groups = await sock.groupFetchAllParticipating();
+          console.log(`👥 Synced with ${Object.keys(groups).length} groups.`);
+      } catch (e) { console.log("Group Sync:", e.message); }
+    }
+
+    if (connection === "close") {
+      const code = lastDisconnect?.error?.output?.statusCode;
+      if (code !== DisconnectReason.loggedOut) {
+        console.log(`♻️ Reconnecting (Code: ${code})...`);
+        setTimeout(startBot, 3000);
+      } else {
+        console.log("🚫 Logged out. Delete auth folder to re-pair.");
+      }
+    }
+  });
+
+  sock.ev.on("messages.upsert", async ({ messages }) => {
+    const msg = messages[0];
+    if (!msg?.message || msg.key.fromMe) return;
+
+    // --- TEXT EXTRACTION ---
+    let msgContent = msg.message;
+    if (msgContent.ephemeralMessage) msgContent = msgContent.ephemeralMessage.message;
+    if (msgContent.viewOnceMessage) msgContent = msgContent.viewOnceMessage.message;
+    if (msgContent.viewOnceMessageV2) msgContent = msgContent.viewOnceMessageV2.message;
+
+    const type = getContentType(msgContent);
+    const body = (type === 'conversation') ? msgContent.conversation : 
+                 (type === 'extendedTextMessage') ? msgContent.extendedTextMessage?.text : 
+                 (type === 'imageMessage') ? msgContent.imageMessage?.caption : 
+                 (type === 'videoMessage') ? msgContent.videoMessage?.caption : '';
+
+    const text = body?.trim();
+    if (!text) return;
+
+    const remoteJid = msg.key.remoteJid;
+    const isGroup = remoteJid.endsWith("@g.us");
+    
+    // Proper sender extraction
+    const rawSender = isGroup ? msg.key.participant : remoteJid;
+    const senderNumber = rawSender ? rawSender.split('@')[0].split(':')[0] : '';
+    const isOwner = ownerNumbers.includes(senderNumber);
+
+    console.log(`📩 [${isGroup ? 'GRP' : 'PVT'}] ${senderNumber} => ${text}`);
+
+    if (!text.startsWith(prefix)) return;
+
+    const args = text.slice(prefix.length).trim().split(/ +/);
+    const commandName = args.shift().toLowerCase();
+
+    if (plugins.has(commandName)) {
+        try {
+            await plugins.get(commandName).execute(sock, msg, args, { isOwner, isGroup });
+        } catch (error) {
+            if (String(error).includes('No sessions') && isGroup) {
+                console.log(`🔧 [AUTO-HEAL] Syncing keys...`);
+                try {
+                    const metadata = await sock.groupMetadata(remoteJid);
+                    for (let p of metadata.participants) {
+                        await sock.presenceSubscribe(p.id); 
+                    }
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                    console.log(`🔁 [AUTO-HEAL] Retrying...`);
+                    await plugins.get(commandName).execute(sock, msg, args, { isOwner, isGroup });
+                } catch (retryError) {
+                    console.error(`❌ Auto-Heal failed:`, retryError.message);
+                }
+            } else {
+                console.error(`❌ Plugin error:`, error.message);
             }
         }
-    });
+    }
+  });
 }
 
-// Render Health Check
-app.get('/', (req, res) => res.send('Bot Online'));
-app.listen(port, () => {
-    startBot();
-    if (config.renderUrl) setInterval(() => fetch(config.renderUrl).catch(() => {}), 600000);
-});
-          
+/* ================= START ================= */
+
+startBot();
+      
